@@ -3,7 +3,7 @@
 // `--model` as global flags before `acp`.
 import type { ModelCatalog, ProviderErrorCode } from "../../contracts.ts";
 import { titleCaseModelId } from "../../contracts.ts";
-import { execCli } from "../../procs.ts";
+import { execCliBoxed } from "../../procs.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 import { CURSOR_STANDALONE } from "./cursor-release.ts";
 import type { DeviceSignIn, DeviceSignInState } from "../device-auth.ts";
@@ -281,8 +281,19 @@ export function decodeCursorAuthText(text: string): boolean | null {
   return null;
 }
 
+type CursorProbe = (
+  cli: string,
+  args: string[],
+  options: { timeout: number; env: NodeJS.ProcessEnv },
+  callback: (error: Error | null, stdout: string) => void,
+) => void;
+
+const execCursorProbe: CursorProbe = (cli, args, options, callback) => {
+  execCliBoxed(cli, args, { ...options, box: false }, callback);
+};
+
 function execText(
-  run: typeof execCli,
+  run: CursorProbe,
   cli: string,
   args: string[],
   env: Record<string, string | undefined>,
@@ -298,7 +309,7 @@ function execText(
 export async function probeCursorAuth(
   cli: string,
   env: Record<string, string | undefined>,
-  run: typeof execCli = execCli,
+  run: CursorProbe = execCursorProbe,
 ): Promise<boolean> {
   if (nonBlank(env.CURSOR_API_KEY) || nonBlank(env.CURSOR_AUTH_TOKEN)) return true;
   for (const args of [["status", "--format", "json"], ["status"]] as const) {
@@ -361,7 +372,7 @@ export function cursorCatalogFromSession(advertised: ModelCatalog["options"]): M
 export async function fetchCursorModels(
   cli: string,
   env: Record<string, string | undefined>,
-  run: typeof execCli = execCli,
+  run: CursorProbe = execCursorProbe,
 ): Promise<ModelCatalog> {
   const fromSession = await discoverAcpModels(env, cli, ["acp"], { variants: false, clientCapabilitiesMeta: CURSOR_CLIENT_META })
     .then((catalog) => cursorCatalogFromSession(catalog.options), () => null);
@@ -465,7 +476,7 @@ async function setCursorFast(
   }
 }
 
-const support = (run: typeof execCli): AcpSupport => ({
+const support = (run: CursorProbe): AcpSupport => ({
   driverKind: "cursorAgent",
   questionRequests: { "cursor/ask_question": CURSOR_ASK_QUESTION }, askTool: "AskQuestion",
   displayName: "Cursor",
@@ -558,7 +569,7 @@ const support = (run: typeof execCli): AcpSupport => ({
   buildPromptText: (turn) => (turn.system ? `${turn.system}\n\n${turn.text}` : turn.text),
 });
 
-export function createCursorAgentDriver(run: typeof execCli = execCli) {
+export function createCursorAgentDriver(run: CursorProbe = execCursorProbe) {
   return createAcpDriver(support(run));
 }
 
